@@ -24,13 +24,17 @@ def main():
     FROM measurements m
     JOIN sensors s ON m.device_id = s.device_id
     """
-    df = pd.read_sql(query, conn, parse_dates=["timestamp"])
+    df = pd.read_sql(query, conn)
 
     for col in agg_columns:
         df[col] = pd.to_numeric(df[col], errors="coerce")
 
+    # timestamps are stored as UTC ISO strings; daily/monthly buckets must use
+    # local time so that day boundaries match what people in Serbia experience
+    df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True).dt.tz_convert("Europe/Belgrade")
+
     df["date"] = df["timestamp"].dt.date
-    df["month"] = df["timestamp"].dt.to_period("M").astype(str)
+    df["month"] = df["timestamp"].dt.strftime("%Y-%m")
 
     # --- Daily average per city ---
     daily = (

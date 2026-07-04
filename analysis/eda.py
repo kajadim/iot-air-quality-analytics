@@ -26,9 +26,12 @@ def load_data(conn):
     FROM measurements m
     JOIN sensors s ON m.device_id = s.device_id
     """
-    df = pd.read_sql(query, conn, parse_dates=["timestamp"])
+    df = pd.read_sql(query, conn)
     for col in measure_cols:
         df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    # convert UTC -> local time so diurnal/seasonal patterns are meaningful
+    df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True).dt.tz_convert("Europe/Belgrade")
 
     return df, measure_cols
 
@@ -51,7 +54,7 @@ def diurnal_pattern(df):
 
 def seasonal_pattern(df):
     df = df.copy()
-    df["month"] = df["timestamp"].dt.to_period("M").astype(str)
+    df["month"] = df["timestamp"].dt.strftime("%Y-%m")
     return df.groupby("month")[["pm25_raw", "pm10_raw"]].mean()
 
 
