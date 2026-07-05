@@ -1,116 +1,82 @@
-# IoT Air Quality Analytics — analiza i predikcija zagađenja vazduha
+# IoT Air Quality Analytics
 
-Analiza i predikcija zagađenja vazduha u Srbiji na osnovu istorijskih podataka sa Clarity senzora. Projekat pokriva ceo tok: ETL (učitavanje i čišćenje podataka) → statistička analiza + AQI → interaktivni Streamlit dashboard → ML predikcija PM2.5/PM10.
+Analysis and prediction of air pollution in Serbia based on historical data from Clarity IoT air-quality sensors. The project covers the full pipeline: **ETL** (loading and cleaning raw CSV exports) → **statistical analysis + EPA AQI computation** → **interactive Streamlit dashboard** → **ML prediction** of PM2.5/PM10 one hour ahead, with anomaly detection.
 
-**Tech stack:** Python, pandas, numpy, SQLite (jedinstvena baza), **Streamlit** (dashboard), Folium (interaktivna mapa), Plotly (grafici), scikit-learn (ML).
+## Features
 
-## Status projekta
+- **ETL pipeline** — loads 31 raw CSV exports, standardizes column names, parses timestamps (UTC), deduplicates overlapping exports (~33k duplicates removed), drops fully-empty columns, and writes everything into a single SQLite database (~136k measurements, 17 sensors, Feb 2022 – Mar 2023)
+- **Geocoding** — assigns a city to each sensor from its GPS coordinates (offline `reverse_geocoder`, GeoNames)
+- **EDA** — descriptive statistics, correlation matrix, diurnal and seasonal patterns, city ranking
+- **AQI** — Air Quality Index computed from concentrations using the official US EPA methodology (breakpoint tables + linear interpolation), cross-validated against the AQI columns shipped in the export (100% agreement within ±1 point on ~110k readings)
+- **Dashboard** — interactive Streamlit app: sensor map, time series, AQI analysis, ML predictions
+- **ML** — PM2.5/PM10 prediction one hour ahead (4 models vs. a persistence baseline, time-based split) and detection of extreme pollution episodes
 
-| Celina | Status |
-| --- | --- |
-| ETL pipeline (učitavanje, čišćenje, deduplikacija, geokodiranje, agregacija) | ✅ Gotovo |
-| EDA (statistika, korelacije, dnevni/sezonski obrasci) | ✅ Gotovo |
-| AQI — izračunavanje iz koncentracija (US EPA) + unakrsna provera | ✅ Gotovo |
-| Streamlit dashboard (mapa senzora, vremenske serije, AQI analiza, filteri) | ✅ Gotovo |
-| ML — feature engineering, predikcija PM2.5/PM10, evaluacija | ✅ Gotovo |
-| Detekcija anomalija + integracija ML u dashboard | ✅ Gotovo |
+## Tech stack
 
-## 1. Podaci
+| | |
+|---|---|
+| Language | Python |
+| Data processing | pandas, numpy |
+| Storage | SQLite (single database file, all pipeline stages communicate through its tables) |
+| Dashboard | Streamlit, Folium (interactive map), Plotly (charts) |
+| ML | scikit-learn |
+| Geocoding | reverse_geocoder (offline, GeoNames) |
 
-Podatke je obezbedio profesor (Clarity air quality senzori). Dva izvora:
+## Project structure
 
-- **`data/raw/kg/`** — mesečni CSV fajlovi samo za Kragujevac (2 senzora)
-- **`data/raw/national/`** — CSV fajlovi za senzore širom Srbije, izvezeni u nepravilnim (delom preklapajućim) intervalima — npr. 4 različita exporta za februar 2023.
+```
+etl/          load_data.py, map_locations.py, aggregate.py   — CSV → SQLite, geocoding, aggregates
+analysis/     eda.py, aqi.py                                 — statistics, EPA AQI + cross-check
+dashboard/    app.py (Streamlit UI), data.py (data access)   — interactive dashboard
+ml/           features.py, train.py, anomalies.py            — feature engineering, models, anomalies
+data/         raw/ and processed/ (not in git)
+```
 
-Sirovi fajlovi se nikad ne menjaju — ETL ih samo čita. Ceo `data/` folder je van git-a; fajlove treba lokalno postaviti pre pokretanja.
+## Data
 
-### Zašto nema MQTT-a?
+The `data/` directory is **not** in git. Before running the pipeline, place the raw CSV exports locally:
 
-U realnoj IoT arhitekturi senzor bi kontinuirano slao merenja preko **MQTT brokera**: `senzor → MQTT broker (publish/subscribe) → ingestion servis → baza`, a dashboard bi se osvežavao u realnom vremenu. Mi umesto toga radimo **offline obradu istorijskog dataseta**: podaci su već izvezeni u CSV fajlove i novi ne pristižu, pa bi MQTT sloj bio veštački dodatak bez funkcije. Fokus projekta je na čišćenju, analizi, vizualizaciji i predikciji nad postojećom istorijom; opisani MQTT lanac je tačka u kojoj bi se ovaj sistem proširio u produkcijsku verziju.
+- `data/raw/kg/` — monthly files for Kragujevac (2 sensors)
+- `data/raw/national/` — exports for sensors across Serbia (irregular, partly overlapping intervals)
 
-## 2. Pokretanje
+Raw files are never modified — everything derived is written to `data/processed/air_quality.db`.
+
+## Getting started
 
 ```bash
 python -m venv venv
 venv\Scripts\activate          # Linux/Mac: source venv/bin/activate
 pip install -r requirements.txt
 
-# 1) ETL — obavezno ovim redosledom
-python etl/load_data.py        # CSV -> data/processed/air_quality.db (tabela measurements)
-python etl/map_locations.py    # + tabela sensors (device_id -> grad, reverse geocoding)
-python etl/aggregate.py        # + tabele daily_city_avg i monthly_city_avg (lokalno vreme)
+# 1) ETL — must run in this order
+python etl/load_data.py        # CSVs -> 'measurements' table
+python etl/map_locations.py    # + 'sensors' table (reverse geocoding)
+python etl/aggregate.py        # + daily/monthly per-city aggregates
 
-# 2) Analiza
-python analysis/eda.py         # statistika, korelacije, obrasci -> data/processed/eda/
-python analysis/aqi.py         # + tabele aqi i daily_city_aqi (US EPA proračun)
+# 2) Analysis
+python analysis/eda.py         # statistics & plots -> data/processed/eda/
+python analysis/aqi.py         # + 'aqi' and 'daily_city_aqi' tables (US EPA)
 
 # 3) ML
-python ml/train.py             # trenira i poredi modele -> ml_metrics, ml_predictions
-python ml/anomalies.py         # detekcija ekstremnih epizoda -> anomalies
+python ml/train.py             # trains & compares models -> ml_metrics, ml_predictions
+python ml/anomalies.py         # extreme episodes -> 'anomalies' table
 
 # 4) Dashboard
 streamlit run dashboard/app.py
 ```
 
-## 3. Struktura projekta (po ulogama iz SCRUM plana)
+## Dashboard
 
-```
-etl/          Član 1 — Data & Backend: load_data.py, map_locations.py, aggregate.py
-analysis/     Analiza: eda.py (EDA), aqi.py (US EPA AQI + unakrsna provera)
-dashboard/    Član 2 — Vizualizacija: app.py (Streamlit UI), data.py (pristup podacima)
-ml/           Član 3 — ML/Predikcija: features.py, train.py, anomalies.py
-```
+Four tabs with shared sidebar filters (period, locations, pollutant):
 
-## 4. ETL pipeline (Član 1)
+1. **Sensor map** (Folium) — markers colored by average AQI category, sized by the average value of the selected pollutant
+2. **Time series** (Plotly) — hourly/daily/monthly series per city + diurnal profile by local hour
+3. **AQI analysis** — daily max AQI heatmap (city × date), category distribution per city, dominant pollutant
+4. **ML prediction** — model comparison, predicted vs. actual per sensor on the test period, detected anomalies
 
-### `etl/load_data.py`
-- Učitava sve `.csv` fajlove iz `data/raw/kg` i `data/raw/national`
-- Preimenuje originalne (duge) nazive kolona u kratke snake_case nazive (npr. `PM2.5 1-Hour Mean Mass Concentration Raw [ug/m3]` → `pm25_raw`)
-- Dodaje `source_dataset` (`"kg"`/`"national"`) i `source_file` kolone
-- Parsira `timestamp` (UTC) i izbacuje redove bez validnog vremena ili `device_id`
-- **Deduplikacija preklapajućih exporta** po ključu `(device_id, timestamp)` — zadržava red sa najviše popunjenih vrednosti (na realnim podacima: ~33k uklonjenih duplikata od ~169k redova)
-- Automatski izbacuje kolone koje su 100% prazne (u ovom exportu: sve `*_calibrated`, ambijentalna temperatura/vlažnost, vetar, pritisak)
-- Rezultat: tabela `measurements` (~136k redova, 17 senzora)
+## ML results
 
-### `etl/map_locations.py`
-- Uzima jedinstvene `(device_id, latitude, longitude)` kombinacije
-- `reverse_geocoder` (offline, GeoNames) dodeljuje grad svakoj lokaciji → tabela `sensors`
-- **Napomena o preciznosti:** biblioteka dodeljuje najbliže poznato naselje iz svoje baze — za manja mesta ume da promaši (npr. senzor u Babušnici dobija Belu Palanku). Lokacije su ručno proverene kroz precizniju pretragu (Google Places).
-
-### `etl/aggregate.py`
-- Spaja `measurements` + `sensors`, konvertuje UTC → **Europe/Belgrade** (dnevne/mesečne granice prate lokalno vreme)
-- Automatski agregira sve numeričke kolone → tabele `daily_city_avg` i `monthly_city_avg`
-
-## 5. Analiza (analysis/)
-
-### `analysis/eda.py`
-Deskriptivna statistika sa procentom nedostajućih vrednosti, korelaciona matrica, dnevni profil (po lokalnom satu), sezonski obrazac (po mesecu), rangiranje gradova po PM2.5. Izlazi (CSV + PNG) idu u `data/processed/eda/`.
-
-### `analysis/aqi.py`
-- **AQI se računa iz koncentracija** po US EPA metodologiji (breakpoint tabele + linearna interpolacija, sa propisanim odsecanjem decimala) — AQI kolone iz exporta se **ne prepisuju**
-- PM2.5 i PM10 na 24h kliznim prosecima (fallback na 1h vrednost), NO2 na 1h; O3 izostavljen (EPA 1h indeks definisan tek ≥125 ppb, a o3_raw je ~86% prazan)
-- Ukupan AQI = max po zagađivačima + dominantni zagađivač + kategorija
-- **Unakrsna provera** na postojećim AQI kolonama iz exporta: naš NO2 AQI se poklapa sa exportovanim `no2_aqi_epa` u okviru ±1 poena na 100% od ~110k merenja (MAE 0.45)
-- Rezultat: tabele `aqi` (po merenju) i `daily_city_aqi` (dnevni max po gradu)
-
-## 6. Dashboard (dashboard/)
-
-`streamlit run dashboard/app.py` — tri taba, sa filterima (period, lokacije, zagađivač) u sidebar-u:
-
-1. **Mapa senzora** (Folium) — markeri obojeni po prosečnoj AQI kategoriji, veličina po prosečnoj vrednosti izabranog zagađivača, popup sa detaljima
-2. **Vremenske serije** (Plotly) — po satu/danu/mesecu za izabrane gradove + dnevni profil po lokalnom satu
-3. **AQI analiza** — heatmap dnevnog max AQI (grad × datum), raspodela kategorija po gradu, dominantni zagađivač
-4. **ML predikcija** — tabela poređenja modela, grafik predikcija vs. stvarnih vrednosti po senzoru na test periodu, prikaz detektovanih anomalija
-
-`dashboard/data.py` je čist sloj za pristup podacima (bez Streamlit-a), pa je testabilan iz komandne linije.
-
-## 6a. ML — predikcija PM2.5/PM10 (ml/)
-
-### `ml/features.py`
-Serija svakog senzora se svodi na satnu rešetku, pa se grade feature-i **isključivo iz prošlosti**: lagovi (1, 2, 3, 6, 12, 24h), klizni proseci/devijacije (3h, 24h), promena u poslednja 3h, plus kalendarski feature-i iz lokalnog vremena (sin/cos sata i meseca, vikend, grejna sezona) i prateća merenja (NO2, interna temperatura/vlažnost). Cilj: vrednost zagađivača **1h unapred**. (~105k redova × 22 feature-a)
-
-### `ml/train.py`
-Vremenski split (prvih 80% vremena trening, poslednjih 20% test — slučajan split bi "procureo" budućnost u trening). Svi modeli se porede sa **persistence baseline-om** ("sledeći sat = trenutni sat"). Rezultati na test periodu (t+1h):
+Time-based 80/20 split (random splitting would leak future data into training). All models are compared against a persistence baseline ("next hour = current hour"). Test-period results (t+1h):
 
 | Model | PM2.5 MAE | PM2.5 R² | PM10 MAE | PM10 R² |
 | --- | --- | --- | --- | --- |
@@ -118,33 +84,25 @@ Vremenski split (prvih 80% vremena trening, poslednjih 20% test — slučajan sp
 | Ridge | 8.26 | 0.830 | 11.63 | 0.823 |
 | Random Forest | 7.85 | 0.842 | **11.02** | 0.833 |
 | HistGradientBoosting | 7.93 | 0.841 | 11.05 | 0.830 |
-| **MLP (neuronska mreža)** | **7.85** | **0.843** | 11.24 | 0.836 |
+| **MLP (neural network)** | **7.85** | **0.843** | 11.24 | 0.836 |
 
-Najbolji modeli: **MLP za PM2.5, Random Forest za PM10** (po MAE). LSTM je razmatran za vremenske serije, ali TensorFlow/Keras nema build za Python 3.14 — MLP nad lag feature-ima pokriva neuronski pristup, a na tabularnim senzorskim podacima gradient boosting / šume su ionako standardno najjače. Modeli se čuvaju u `ml/models/*.joblib`, metrike u tabeli `ml_metrics`, predikcije najboljeg modela u `ml_predictions`.
+Best models (by MAE): **MLP for PM2.5, Random Forest for PM10** — saved to `ml/models/*.joblib`.
 
-### `ml/anomalies.py`
-Ekstremne epizode po gradu i danu, dva komplementarna kriterijuma: **statistički** (robusni z-score preko medijane/MAD po gradu, |z| > 3 — "neuobičajeno za taj grad") i **apsolutni** (dnevni prosek preko EPA 24h "Unhealthy" praga: PM2.5 > 55.4, PM10 > 154 µg/m³). Na realnim podacima: 443 anomalna grad-dana, dominiraju zimske epizode u grejnoj sezoni (najgori dan: Bela Palanka, 16.12.2022, PM2.5 = 216 µg/m³). Rezultat u tabeli `anomalies`.
+Anomaly detection combines a robust statistical criterion (median/MAD z-score per city, |z| > 3) with an absolute EPA threshold (daily mean PM2.5 > 55.4 or PM10 > 154 µg/m³): **443 anomalous city-days**, overwhelmingly in the heating season (worst: Bela Palanka, 2022-12-16, PM2.5 = 216 µg/m³).
 
-## 7. Šema baze (`data/processed/air_quality.db`)
+## Design decisions
 
-| Tabela | Opis |
-| --- | --- |
-| `measurements` | Očišćena merenja — jedan red = jedno očitavanje senzora (UTC ISO timestamp) |
-| `sensors` | `device_id → latitude, longitude, city, region, country_code` |
-| `daily_city_avg` / `monthly_city_avg` | Proseci po gradu po danu/mesecu (lokalni dani) |
-| `aqi` | Izračunati AQI po merenju (po zagađivaču + ukupan + kategorija) |
-| `daily_city_aqi` | Dnevni max AQI po gradu |
-| `ml_metrics` | MAE/RMSE/R² svih modela po ciljnoj veličini |
-| `ml_predictions` | Predikcije najboljeg modela na test periodu |
-| `anomalies` | Detektovane ekstremne epizode (grad, dan, kriterijumi, ozbiljnost) |
+- **SQLite as the single artifact** — one file, zero administration, SQL queries; every script reads from and writes to the same database, and all tables are written with `if_exists="replace"`, so reruns are idempotent.
+- **AQI is computed, not copied** — the export's own AQI columns are used only to cross-validate our EPA implementation, never copied into results.
+- **UTC storage, local-time analysis** — timestamps are stored as UTC ISO-8601 strings; every consumer converts to `Europe/Belgrade` before deriving hours/days/months, because diurnal and daily patterns follow local human behavior (heating, traffic).
+- **Time-based train/test split** — the first 80% of the timeline trains, the last 20% tests; a random split would leak the future into training.
+- **No MQTT / live ingestion (by design)** — the input is a static, already-exported historical dataset. In a production IoT setup a `sensor → MQTT broker → ingestion service` chain would feed the same `measurements` table; with no live data it would be an artificial layer with no function.
+- **MLP instead of LSTM** — TensorFlow/Keras has no build for Python 3.14; an MLP over lag features covers the neural approach, and tree ensembles are the usual winners on tabular sensor data anyway.
 
-## 8. Poznata ograničenja podataka
+## Known data limitations
 
-- **Kalibrisane vrednosti, ambijentalna temperatura/vlažnost, vetar i pritisak ne postoje** u ovom exportu (kolone 100% prazne, automatski izbačene) → za analizu/ML se koriste `_raw` vrednosti
-- **`o3_raw` je ~86% prazan** — koristiti oprezno
-- `kg` i `national` dataseti dele dva kragujevačka senzora, ali pokrivaju komplementarne periode (nema pravih duplikata između njih)
-- Beograd ima senzore u više opština (Novi Beograd, Palilula, Stari Grad, Vračar) — drže se odvojeno, ne spajaju se u jedan "Beograd"
-
-## 9. SCRUM
-
-Projekat je rađen po SCRUM planu (tim od 3 člana: Data & Backend, Vizualizacija/Dashboard, ML/Predikcija) kroz tri sprinta — plan i sprint dokumentacija se vode interno. Tech stack za dashboard je u toku rada zaključen na **Streamlit** (umesto Dash opcije iz prvobitnog plana).
+- Calibrated values (`*_calibrated`), ambient temperature/humidity, wind, and pressure are entirely empty in this export (auto-dropped) — analysis uses the `_raw` columns.
+- `o3_raw` is ~86% missing — excluded from AQI, used with caution elsewhere.
+- City names come from the nearest-settlement match in GeoNames and can be imprecise for small towns (e.g., a sensor in Babušnica resolves to Bela Palanka).
+- Belgrade sensors are kept split by municipality (Novi Beograd, Palilula, Stari Grad, Vračar), not merged.
+- The dataset covers ~13 months, so seasonal conclusions rest on a single winter.
